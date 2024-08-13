@@ -1,0 +1,99 @@
+module clock_divider (
+ input wire clock_in, // Input clock signal
+ output wire divided_clock_out // Output divided clock signal
+);
+ reg [7:0] count;
+ always @(posedge clock_in) begin
+ if (count == 8'b11111111) begin
+ count <= 8'b0;
+ divided_clock_out <= ~divided_clock_out;
+ end else begin
+ count <= count + 1;
+ end
+ end
+endmodule
+module mux_4to1 (
+ input wire [3:0] data_inputs, // Four data inputs (4 bits)
+ input wire [1:0] select_inputs, // Two select inputs (2 bits)
+ output wire output_data // Output
+);
+ assign output_data = (select_inputs == 2'b00) ? data_inputs[0] :
+ (select_inputs == 2'b01) ? data_inputs[1] :
+ (select_inputs == 2'b10) ? data_inputs[2] :
+ data_inputs[3];
+endmodule
+module mux_2to1 (
+ input wire data_input_0, // First data input
+ input wire data_input_1, // Second data input
+ input wire select_input, // Select input
+ output wire output_data // Output
+);
+ assign output_data = (select_input) ? data_input_1 : data_input_0;
+endmodule
+module testbench;
+ reg [3:0] D; // Data inputs
+ reg CLK; // Clock signal
+ reg RST; // Reset signal
+ reg [1:0] S; // Control signals S1, S0
+ wire [3:0] Q; // Output
+ // Instantiate the multifunction_register module
+ multifunction_register mfr (
+ .D(D),
+ .CLK(CLK),
+ .RST(RST),
+ .S(S),
+ .Q(Q)
+ );
+ // Clock generation
+ always begin
+ #5 CLK = ~CLK;
+ end
+ // Testbench stimulus
+ initial begin
+ CLK = 0;
+ RST = 0;
+ D = 4'b1010;
+ S = 2'b00;
+ // Apply parallel load operation
+ #10 D = 4'b1100;
+ #10 D = 4'b0011;
+ // Apply shift right operation
+ S = 2'b10;
+ #10 S = 2'b00;
+ // Apply shift left operation
+ S = 2'b11;
+ #10 $finish;
+ end
+ // Display output
+ always @(posedge CLK) begin
+ $display("Q = %b", Q);
+ end
+endmodule
+// Simulate the testbench
+initial begin
+ $dumpfile("multifunction_register.vcd");
+ $dumpvars(0, testbench);
+ $display("Starting simulation...");
+ $monitor($time, " CLK=%b RST=%b D=%b S=%b Q=%b", CLK, RST, D, S, Q);
+ $finish;
+end
+endmodule
+module multifunction_register (
+ input wire [3:0] D, // Data inputs
+ input wire CLK, // Clock input
+ input wire RST, // Reset input
+ input wire [1:0] S, // Control inputs S1, S0
+ output wire [3:0] Q // Output
+);
+ wire [3:0] mux_inputs; // Data inputs to multiplexers
+ // Connect data inputs to multiplexers based on control signals
+ assign mux_inputs[0] = (S == 2'b00) ? D[0] : (S == 2'b10) ? Q[3] : Q[0];
+ assign mux_inputs[1] = (S == 2'b00) ? D[1] : (S == 2'b10) ? Q[0] : Q[1];
+ assign mux_inputs[2] = (S == 2'b00) ? D[2] : (S == 2'b10) ? Q[1] : Q[2];
+ assign mux_inputs[3] = (S == 2'b00) ? D[3] : (S == 2'b10) ? Q[2] : Q[3];
+ // Instantiate D flip-flops and multiplexers
+ d_flip_flop #(4) ff0 (.D(mux_inputs[0]), .CLK(CLK), .RST(RST), .Q(Q[0]));
+ d_flip_flop #(4) ff1 (.D(mux_inputs[1]), .CLK(CLK), .RST(RST), .Q(Q[1]));
+ d_flip_flop #(4) ff2 (.D(mux_inputs[2]), .CLK(CLK), .RST(RST), .Q(Q[2]));
+ d_flip_flop #(4) ff3 (.D(mux_inputs[3]), .CLK(CLK), .RST(RST), .Q(Q[3]));
+endmodule
