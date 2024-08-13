@@ -1,0 +1,250 @@
+`timescale 1ns / 1ps // Uart8.sv
+module Uart8 #(
+parameter CLOCK_RATE = 100000000, // Board internal clock
+parameter BAUD_RATE = 9600 )(
+input wire clk,
+// RX interface
+input wire rx,
+input wire rxEn, output wire [7:0] out, output wire rxDone, output wire rxBusy, output wire rxErr,
+// TX interface output wire tx, input wire txEn, input wire txStart,
+ input wire [7:0] in, output wire txDone, output wire txBusy
+);
+wire rxClk; wire txClk;
+BaudRateGenerator #( .CLOCK_RATE(CLOCK_RATE), .BAUD_RATE(BAUD_RATE)
+) generatorInst ( .clk(clk),
+.rxClk(rxClk),
+.txClk(txClk) );
+Uart8Receiver rxInst ( .clk(rxClk), .en(rxEn),
+.in(rx),
+.out(out), .done(rxDone), .busy(rxBusy), .err(rxErr)
+);
+Uart8Transmitter txInst ( .clk(txClk),
+.en(txEn), .start(txStart),
+.in(in),
+.out(tx), .done(txDone), .busy(txBusy)
+
+ );
+endmodule
+`timescale 1ns / 1ps
+// BaudRateGenerator.sv module BaudRateGenerator #(
+parameter int CLOCK_RATE = 100000000, // Board internal clock (default == 100MHz)
+parameter int BAUD_RATE = 9600 )(
+input wire clk, // Board clock
+output reg rxClk = 1'b0, // Baud rate for RX, initialized to 0 output reg txClk = 1'b0 // Baud rate for TX, initialized to 0
+);
+parameter int MAX_RATE_RX = CLOCK_RATE / (2 * BAUD_RATE * 16); // 16x oversample
+parameter int MAX_RATE_TX = CLOCK_RATE / (2 * BAUD_RATE); parameter int RX_CNT_WIDTH = $clog2(MAX_RATE_RX); parameter int TX_CNT_WIDTH = $clog2(MAX_RATE_TX);
+reg [RX_CNT_WIDTH - 1:0] rxCounter = 0; reg [TX_CNT_WIDTH - 1:0] txCounter = 0;
+always @(posedge clk) begin
+// RX clock
+if (rxCounter == MAX_RATE_RX[RX_CNT_WIDTH-1:0]) begin
+rxCounter <= 0;
+rxClk <= ~rxClk; end else begin
+rxCounter <= rxCounter + 1'b1; end
+// TX clock
+if (txCounter == MAX_RATE_TX[TX_CNT_WIDTH-1:0]) begin
+txCounter <= 0;
+
+ txClk <= ~txClk; end else begin
+txCounter <= txCounter + 1'b1; end
+end
+endmodule `timescale 1ns / 1ps // Uart8Receiver.sv
+module Uart8Receiver (
+);
+input wire clk,
+input wire en,
+input wire in,
+output reg [7:0] out, // Received data
+output reg done, output reg busy, output reg err
+// End of transaction
+// Transaction in process
+// Error while receiving data
+// Baud rate clock // Enable signal
+// RX input
+// States of the state machine typedef enum logic [1:0] {
+IDLE = 2'b00, DATA_BITS = 2'b01, STOP_BIT = 2'b10
+} UartState;
+UartState state;
+reg [2:0] bitIdx = 3'b0; // For 8-bit data
+reg [1:0] inputSw = 2'b0; // Shift register for input signal state
+reg [3:0] clockCount = 4'b0; // Count clocks for 16x oversample reg [7:0] receivedData = 8'b0; // Temporary storage for input data
+// Initialization initial begin
+
+ out = 8'b0; err = 1'b0; done = 1'b0; busy = 1'b0; state = IDLE;
+end
+// State machine process always_ff @(posedge clk) begin
+// Shift in the input data inputSw = {inputSw[0], in};
+// Reset state machine if disabled if (!en) begin
+state <= IDLE; end
+// State machine logic case (state)
+IDLE: begin
+done <= 1'b0;
+if (&clockCount) begin
+state <= DATA_BITS; out <= 8'b0;
+bitIdx <= 3'b0; clockCount <= 4'b0; receivedData <= 8'b0; busy <= 1'b1;
+err <= 1'b0;
+end else if (!(&inputSw) || |clockCount) begin
+// Check bit to make sure it's still low if (&inputSw) begin
+err <= 1'b1; state <= IDLE;
+
+ end
+clockCount <= clockCount + 4'b1; end
+end
+DATA_BITS: begin
+if (&clockCount) begin
+clockCount <= 4'b0; receivedData[bitIdx] <= inputSw[0]; if (&bitIdx) begin
+bitIdx <= 3'b0;
+state <= STOP_BIT; end else begin
+bitIdx <= bitIdx + 3'b1; end
+end else begin
+clockCount <= clockCount + 4'b1;
+end end
+STOP_BIT: begin
+if (&clockCount || (clockCount >= 4'h8 && !(|inputSw))) begin
+state <= IDLE;
+done <= 1'b1;
+busy <= 1'b0;
+out <= receivedData; clockCount <= 4'b0;
+end else begin
+clockCount <= clockCount + 1;
+// Check bit to make sure it's still high if (!(|inputSw)) begin
+err <= 1'b1;
+state <= IDLE; end
+
+ end end
+default: state <= IDLE; endcase
+end
+endmodule
+`timescale 1ns / 1ps
+// Uart8Transmitter.sv `include "UartStates.vhd"
+module Uart8Transmitter (
+input wire
+input wire
+input wire
+input wire
+output reg
+output reg
+output reg busy // transaction is in process
+);
+`IDLE out
+done
+busy
+bitIdx <= 3'b0; data <= 8'b0;
+clk, // baud rate
+en,
+start, // start of transaction
+[7:0] in, // data to transmit out, // tx
+done, // end of transaction
+reg [2:0] state = `RESET;
+reg [7:0] data = 8'b0; // to store a copy of input data reg [2:0] bitIdx = 3'b0; // for 8-bit data
+always_ff @(posedge clk) begin case (state)
+: begin
+<= 1'b1; // drive line high for idle
+<= 1'b0; <= 1'b0;
+
+ if (start & en) begin
+data <= in; // save a copy of input data state <= `START_BIT;
+end end
+`START_BIT : begin
+out busy state
+<= 1'b0; // send start bit (low) <= 1'b1;
+<= `DATA_BITS;
+end
+`DATA_BITS : begin // Wait 8 clock cycles for data bits to be sent
+out <= data[bitIdx]; if (&bitIdx) begin
+bitIdx <= 3'b0;
+state <= `STOP_BIT; end else begin
+bitIdx <= bitIdx + 1'b1; end
+end
+`STOP_BIT : begin // Send out Stop bit (high)
+done data state
+end default
+state end
+endcase end
+<= 1'b1; <= 8'b0; <= `IDLE;
+: begin <= `IDLE;
+endmodule
+`timescale 1ns / 100ps
+`ifndef SIMULATION_CYCLES
+
+ `define SIMULATION_CYCLES 120 `endif
+`include "UartStates.vhd" module Uart8Transmitter_tb;
+parameter Tt
+reg clk; reg en; reg start; reg [7:0] in; reg out; reg done; reg busy;
+= 20; // clock timeout
+Uart8Transmitter utx ( .clk ( clk ),
+.en ( en ), .start ( start ),
+.in ( in ),
+.out .done .busy
+// simulation init initial begin
+clk = 0;
+forever clk = #(Tt/2) ~clk; end
+initial begin rst_n = 0;
+);
+( out
+( done ),
+), ( busy )
+
+ repeat (4) @(posedge clk);
+rst_n = 1; end
+// register file reset integer i;
+initial begin
+for (i = 0; i < 32; i = i + 1) begin sm_top.sm_cpu.rf.rf[i] = 0;
+end end
+task disasmInstr ( input [31:0] instr
+);
+reg [ 5:0] cmdOper;
+reg [ 5:0] cmdFunk;
+reg [ 4:0] cmdRs;
+reg [ 4:0] cmdRt;
+reg [ 4:0] cmdRd;
+reg [ 4:0] cmdSa;
+reg [15:0] cmdImm;
+reg signed [15:0] cmdImmS;
+begin
+cmdOper = instr[31:26]; cmdFunk = instr[ 5:0 ];
+cmdRs
+cmdRt
+cmdRd
+cmdSa
+cmdImm = instr[15:0 ]; cmdImmS = instr[15:0 ];
+= instr[25:21]; = instr[20:16];
+= instr[15:11]; = instr[10:6 ];
+
+ cmdRt); cmdRt); cmdRt); cmdRt); cmdRt);
+$write(" ");
+casez( {cmdOper,cmdFunk} )
+default : if (instr == 32'b0) begin
+$write ("nop"); end else begin
+$write ("new/unknown"); end
+{ `C_SPEC, `F_ADDU } : $write ("addu $%1d, $%1d, $%1d", cmdRd, cmdRs, { `C_SPEC, `F_OR } : $write ("or $%1d, $%1d, $%1d", cmdRd, cmdRs,
+{ `C_SPEC, `F_SRL } : $write ("srl $%1d, $%1d, $%1d", cmdRd, cmdRs,
+{ `C_SPEC, `F_SLTU } : $write ("sltu $%1d, $%1d, $%1d", cmdRd, cmdRs,
+{ `C_SPEC, `F_SUBU } : $write ("subu $%1d, $%1d, $%1d", cmdRd, cmdRs, cmdImm);{ `C_ADDIU, `F_ANY } : $write ("addiu $%1d, $%1d, %1d", cmdRt, cmdRs,
+`F_ANY } : $write ("lui $%1d, %1d", cmdRt, cmdImm);
+`F_ANY } : $write ("beq $%1d, $%1d, %1d", cmdRs, cmdRt, `F_ANY } : $write ("bne $%1d, $%1d, %1d", cmdRs, cmdRt,
+{ `C_LUI,
+{ `C_BEQ, cmdImmS + 1);
+{ `C_BNE, cmdImmS + 1);
+{ `C_SPEC, `F_XOR } : $write ("xor $%1d, $%1d, %1d", cmdRd, cmdRs, cmdImm);{ `C_XORI, `F_ANY } : $write ("xori $%1d, $%1d, %1d", cmdRd, cmdRs,
+{ `C_SPEC, `F_JR } : $write ("jr $%1d", cmdRs);
+cmdImm);{ `C_SPEC, `F_SLL } : $write ("sll $%1d, $%1d, %1d", cmdRd, cmdRs,
+{ `C_LIB, `F_ANY } : $write ("lib $%1d, $%1d", cmdRd, cmdImm); endcase
+end endtask
+// simulation debug output integer cycle; initial cycle = 0;
+cmdRt);
+
+initial regAddr = 0; // get PC
+always @(posedge clk) begin
+$write ("%5d pc = %2d pcaddr = %h instr = %h v0 = %1d",
+cycle, regData, (regData << 2), sm_top.sm_cpu.instr, sm_top.sm_cpu.rf.rf[2]); disasmInstr(sm_top.sm_cpu.instr);
+$write("\n");
+cycle = cycle + 1;
+if (cycle > `SIMULATION_CYCLES) begin $display ("Timeout");
+$stop;
+end end
+endmodule
+`define RESET `define IDLE `define START_BIT `define DATA_BITS `define STOP_BIT
+3'b001 3'b010
+3'b011 // transmitter only
+3'b100 3’b101
